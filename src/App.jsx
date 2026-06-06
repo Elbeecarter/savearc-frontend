@@ -460,6 +460,34 @@ export default function App() {
         </div>
       )}
 
+      {/* CREATE POOL MODAL */}
+      {showPoolModal && (
+        <div className="overlay" onClick={() => setShowPoolModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>Create Community Pool</h2>
+            <label>Pool Name</label>
+            <input placeholder="e.g. Lagos Traders Ajo" value={poolForm.name} onChange={e => setPoolForm({ ...poolForm, name: e.target.value })} />
+            <label>Contribution per Cycle (USDC)</label>
+            <input type="number" placeholder="50" value={poolForm.contribution} onChange={e => setPoolForm({ ...poolForm, contribution: e.target.value })} />
+            <label>Cycle Duration</label>
+            <select value={poolForm.cycle} onChange={e => setPoolForm({ ...poolForm, cycle: e.target.value })}>
+              <option value="1">Daily</option>
+              <option value="7">Weekly</option>
+              <option value="14">Bi-weekly</option>
+              <option value="30">Monthly</option>
+            </select>
+            <label>Max Members</label>
+            <input type="number" placeholder="5" min="3" max="50" value={poolForm.members} onChange={e => setPoolForm({ ...poolForm, members: e.target.value })} />
+            <div className="modal-actions">
+              <button className="btn gray" onClick={() => setShowPoolModal(false)}>Cancel</button>
+              <button className="btn green" onClick={handleCreatePool} disabled={loading}>
+                {loading ? 'Creating...' : 'Create Pool'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CONTRIBUTE MODAL */}
       {showContributeModal !== null && (
         <div className="overlay" onClick={() => setShowContributeModal(null)}>

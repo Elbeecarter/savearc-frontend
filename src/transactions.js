@@ -29,9 +29,7 @@ const USDC_ABI = [
 ]
 
 const RPC = 'https://rpc.testnet.arc.network'
-
 const getProvider = () => new ethers.JsonRpcProvider(RPC)
-
 const getAccount = async () => {
   const accounts = await window.ethereum.request({ method: 'eth_accounts' })
   return accounts[0]
@@ -41,17 +39,12 @@ const sendTx = async (to, data) => {
   await switchToArc()
   const from = await getAccount()
   const provider = getProvider()
-
-  // Get fee data from Arc
   const feeData = await provider.getFeeData()
   const nonce = await provider.getTransactionCount(from)
   const gasPrice = feeData.gasPrice || ethers.parseUnits('1', 'gwei')
-
-  // Estimate gas
   const gasEstimate = await provider.estimateGas({ from, to, data })
-  const gasLimit = (gasEstimate * 120n) / 100n // 20% buffer
+  const gasLimit = (gasEstimate * 120n) / 100n
 
-  // Build EIP-1559 transaction
   const tx = {
     from,
     to,
@@ -68,7 +61,6 @@ const sendTx = async (to, data) => {
     params: [tx],
   })
 
-  // Wait for receipt
   let receipt = null
   while (!receipt) {
     await new Promise(r => setTimeout(r, 1500))
@@ -97,12 +89,10 @@ export const depositToGoal = async (goalId, amount, account) => {
   const provider = getProvider()
   const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, provider)
   const allowance = await usdc.allowance(account, VAULT_ADDRESS)
-
   if (allowance < parsedAmount) {
     const approveData = encodeData(USDC_ABI, 'approve', [VAULT_ADDRESS, parsedAmount])
     await sendTx(USDC_ADDRESS, approveData)
   }
-
   const data = encodeData(VAULT_ABI, 'deposit', [goalId, parsedAmount])
   return sendTx(VAULT_ADDRESS, data)
 }
@@ -137,12 +127,10 @@ export const contributeToPool = async (poolId, amount, account) => {
   const provider = getProvider()
   const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, provider)
   const allowance = await usdc.allowance(account, POOL_ADDRESS)
-
   if (allowance < parsedAmount) {
     const approveData = encodeData(USDC_ABI, 'approve', [POOL_ADDRESS, parsedAmount])
     await sendTx(USDC_ADDRESS, approveData)
   }
-
   const data = encodeData(POOL_ABI, 'contribute', [poolId])
   return sendTx(POOL_ADDRESS, data)
 }
@@ -153,12 +141,31 @@ export const fetchUserGoals = async (address) => {
 }
 
 export const fetchPools = async () => {
-  const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, getProvider())
-  const count = await pool.poolCount()
+  const provider = getProvider()
+  const poolContract = new ethers.Contract(POOL_ADDRESS, POOL_ABI, provider)
+  const count = await poolContract.poolCount()
   const allPools = []
   for (let i = 0; i < Number(count); i++) {
-    const p = await pool.getPool(i)
-    allPools.push({ ...p, id: i })
+    try {
+      const p = await poolContract.getPool(i)
+      allPools.push({
+        id: i,
+        name: p.name || '',
+        creator: p.creator || '',
+        contributionAmount: p.contributionAmount || 0n,
+        cycleDuration: p.cycleDuration || 0n,
+        maxMembers: p.maxMembers || 0n,
+        currentCycle: p.currentCycle || 0n,
+        startTime: p.startTime || 0n,
+        nextCycleTime: p.nextCycleTime || 0n,
+        status: p.status || 0n,
+        members: Array.isArray(p.members) ? p.members : [],
+        currentRecipient: p.currentRecipient || '',
+        poolBalance: p.poolBalance || 0n,
+      })
+    } catch (e) {
+      console.error('Error fetching pool', i, e)
+    }
   }
   return allPools
 }
