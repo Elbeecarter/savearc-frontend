@@ -1,3 +1,4 @@
+import TransactionHistory from "./TransactionHistory.jsx"
 import { useState, useEffect } from 'react'
 import { switchToArc } from './utils.js'
 import {
@@ -271,6 +272,12 @@ export default function App() {
             <button className="btn orange" onClick={() => { setActiveTab('goals'); setShowGoalModal(true) }}>+ New Goal</button>
             <button className="btn green" onClick={() => { setActiveTab('pools'); setShowPoolModal(true) }}>+ New Pool</button>
             <a className="btn gray" href={`https://testnet.arcscan.app/address/${account}`} target="_blank" rel="noreferrer">View on Explorer</a>
+          </div>
+
+          {/* Transaction History */}
+          <div style={{marginTop:'2rem'}}>
+            <h3 style={{fontFamily:'Space Mono', marginBottom:'1rem'}}>📜 Transaction History</h3>
+            <TransactionHistory account={account} />
           </div>
 
           {/* Recent Goals Preview */}
