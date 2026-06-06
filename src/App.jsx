@@ -1,41 +1,15 @@
 import { useState, useEffect } from 'react'
-import { ethers } from 'ethers'
+import { switchToArc } from './utils.js'
+import {
+  createGoal, depositToGoal, withdrawFromGoal, emergencyWithdrawFromGoal,
+  createPool, joinPool, contributeToPool,
+  fetchUserGoals, fetchPools, fetchUSDCBalance
+} from './transactions.js'
 import './App.css'
-
-const ARC_CHAIN_ID = 5042002
-const ARC_RPC = 'https://rpc.testnet.arc.network'
-const USDC_ADDRESS = '0x3600000000000000000000000000000000000000'
-const VAULT_ADDRESS = '0x6eD021481140a6B385dfc45d9c8B4F5D583Da1ab'
-const POOL_ADDRESS = '0x1a3729b5ddc9A0FC9d5D21857539bCE460ac91D2'
-
-const VAULT_ABI = [
-  'function createGoal(string,uint256,uint256,uint256) returns (uint256)',
-  'function deposit(uint256,uint256)',
-  'function withdraw(uint256)',
-  'function emergencyWithdraw(uint256,uint256)',
-  'function getUserGoals(address) view returns (tuple(string name,uint256 targetAmount,uint256 currentAmount,uint256 deadline,uint256 lockPeriod,uint256 createdAt,uint256 lastDepositTime,bool isActive)[])',
-]
-
-const POOL_ABI = [
-  'function createPool(string,uint256,uint256,uint256) returns (uint256)',
-  'function joinPool(uint256)',
-  'function startPool(uint256)',
-  'function contribute(uint256)',
-  'function getPool(uint256) view returns (tuple(string name,address creator,uint256 contributionAmount,uint256 cycleDuration,uint256 maxMembers,uint256 currentCycle,uint256 startTime,uint256 nextCycleTime,uint8 status,address[] members,address currentRecipient,uint256 poolBalance))',
-  'function poolCount() view returns (uint256)',
-]
-
-const USDC_ABI = [
-  'function balanceOf(address) view returns (uint256)',
-  'function approve(address,uint256) returns (bool)',
-  'function allowance(address,address) view returns (uint256)',
-]
 
 export default function App() {
   const [account, setAccount] = useState(null)
   const [balance, setBalance] = useState('0')
-  const [provider, setProvider] = useState(null)
-  const [signer, setSigner] = useState(null)
   const [goals, setGoals] = useState([])
   const [pools, setPools] = useState([])
   const [activeTab, setActiveTab] = useState('dashboard')
@@ -44,13 +18,16 @@ export default function App() {
   const [showGoalModal, setShowGoalModal] = useState(false)
   const [showPoolModal, setShowPoolModal] = useState(false)
   const [showDepositModal, setShowDepositModal] = useState(null)
+  const [showWithdrawModal, setShowWithdrawModal] = useState(null)
+  const [showContributeModal, setShowContributeModal] = useState(null)
   const [goalForm, setGoalForm] = useState({ name: '', target: '', days: '180', lock: '30' })
   const [poolForm, setPoolForm] = useState({ name: '', contribution: '', cycle: '7', members: '5' })
   const [depositAmount, setDepositAmount] = useState('')
+  const [withdrawAmount, setWithdrawAmount] = useState('')
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
-    setTimeout(() => setToast(null), 4000)
+    setTimeout(() => setToast(null), 5000)
   }
 
   const connectWallet = async () => {
@@ -58,32 +35,7 @@ export default function App() {
     try {
       setLoading(true)
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' })
-
-      // Switch to Arc Testnet
-      try {
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0x4CF772' }],
-        })
-      } catch (e) {
-        if (e.code === 4902) {
-          await window.ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [{
-              chainId: '0x4CF772',
-              chainName: 'Arc Testnet',
-              nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 6 },
-              rpcUrls: [ARC_RPC],
-              blockExplorerUrls: ['https://testnet.arcscan.app'],
-            }],
-          })
-        }
-      }
-
-      const web3Provider = new ethers.BrowserProvider(window.ethereum)
-      const web3Signer = await web3Provider.getSigner()
-      setProvider(web3Provider)
-      setSigner(web3Signer)
+      await switchToArc()
       setAccount(accounts[0])
       showToast('Connected to Arc Testnet!')
     } catch (e) {
@@ -93,55 +45,47 @@ export default function App() {
     }
   }
 
-  const fetchBalance = async () => {
-    if (!account || !provider) return
-    const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, provider)
-    const bal = await usdc.balanceOf(account)
-    setBalance(ethers.formatUnits(bal, 6))
-  }
-
-  const fetchGoals = async () => {
-    if (!account || !provider) return
-    const vault = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, provider)
-    const data = await vault.getUserGoals(account)
-    setGoals(data)
-  }
-
-  const fetchPools = async () => {
-    if (!provider) return
-    const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, provider)
-    const count = await pool.poolCount()
-    const allPools = []
-    for (let i = 0; i < count; i++) {
-      const p = await pool.getPool(i)
-      allPools.push({ ...p, id: i })
+  const refreshData = async () => {
+    if (!account) return
+    try {
+      const [bal, userGoals, allPools] = await Promise.all([
+        fetchUSDCBalance(account),
+        fetchUserGoals(account),
+        fetchPools()
+      ])
+      setBalance(bal)
+      setGoals(userGoals)
+      setPools(allPools)
+    } catch (e) {
+      console.error('Refresh error:', e)
     }
-    setPools(allPools)
   }
 
   useEffect(() => {
-    if (account && provider) {
-      fetchBalance()
-      fetchGoals()
-      fetchPools()
-    }
-  }, [account, provider])
+    if (account) refreshData()
+  }, [account])
 
-  const createGoal = async () => {
-    if (!signer) return showToast('Connect wallet first', 'error')
+  // Listen for account changes
+  useEffect(() => {
+    if (window.ethereum) {
+      window.ethereum.on('accountsChanged', (accounts) => {
+        if (accounts.length > 0) setAccount(accounts[0])
+        else setAccount(null)
+      })
+      window.ethereum.on('chainChanged', () => window.location.reload())
+    }
+  }, [])
+
+  const handleCreateGoal = async () => {
+    if (!goalForm.name || !goalForm.target) return showToast('Fill all fields', 'error')
     try {
       setLoading(true)
-      const vault = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, signer)
-      const target = ethers.parseUnits(goalForm.target, 6)
-      const deadline = Math.floor(Date.now() / 1000) + parseInt(goalForm.days) * 86400
-      const lock = parseInt(goalForm.lock) * 86400
-      const tx = await vault.createGoal(goalForm.name, target, deadline, lock)
-      showToast('Creating goal... waiting for confirmation')
-      await tx.wait()
-      showToast('Goal created! Tx: ' + tx.hash.slice(0, 20) + '...')
+      showToast('Creating goal on Arc Network...')
+      const hash = await createGoal(goalForm.name, goalForm.target, goalForm.days, goalForm.lock)
+      showToast('Goal created! Tx: ' + hash.slice(0, 16) + '...')
       setShowGoalModal(false)
       setGoalForm({ name: '', target: '', days: '180', lock: '30' })
-      await fetchGoals()
+      await refreshData()
     } catch (e) {
       showToast('Failed: ' + e.message, 'error')
     } finally {
@@ -149,30 +93,16 @@ export default function App() {
     }
   }
 
-  const depositToGoal = async (goalId) => {
-    if (!signer || !depositAmount) return
+  const handleDeposit = async () => {
+    if (!depositAmount) return showToast('Enter amount', 'error')
     try {
       setLoading(true)
-      const amount = ethers.parseUnits(depositAmount, 6)
-      const usdc = new ethers.Contract(USDC_ADDRESS, USDC_ABI, signer)
-
-      // Check allowance
-      const allowance = await usdc.allowance(account, VAULT_ADDRESS)
-      if (allowance < amount) {
-        showToast('Approving USDC...')
-        const approveTx = await usdc.approve(VAULT_ADDRESS, amount)
-        await approveTx.wait()
-      }
-
-      const vault = new ethers.Contract(VAULT_ADDRESS, VAULT_ABI, signer)
-      showToast('Depositing...')
-      const tx = await vault.deposit(goalId, amount)
-      await tx.wait()
-      showToast('Deposit successful!')
+      showToast('Approving USDC...')
+      const hash = await depositToGoal(showDepositModal, depositAmount, account)
+      showToast('Deposited! Tx: ' + hash.slice(0, 16) + '...')
       setShowDepositModal(null)
       setDepositAmount('')
-      await fetchGoals()
-      await fetchBalance()
+      await refreshData()
     } catch (e) {
       showToast('Failed: ' + e.message, 'error')
     } finally {
@@ -180,20 +110,48 @@ export default function App() {
     }
   }
 
-  const createPool = async () => {
-    if (!signer) return showToast('Connect wallet first', 'error')
+  const handleWithdraw = async (goalId) => {
     try {
       setLoading(true)
-      const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer)
-      const contribution = ethers.parseUnits(poolForm.contribution, 6)
-      const cycle = parseInt(poolForm.cycle) * 86400
-      const tx = await pool.createPool(poolForm.name, contribution, cycle, parseInt(poolForm.members))
-      showToast('Creating pool...')
-      await tx.wait()
-      showToast('Pool created!')
+      showToast('Withdrawing...')
+      const hash = await withdrawFromGoal(goalId)
+      showToast('Withdrawn! Tx: ' + hash.slice(0, 16) + '...')
+      setShowWithdrawModal(null)
+      await refreshData()
+    } catch (e) {
+      showToast('Failed: ' + e.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleEmergencyWithdraw = async (goalId) => {
+    if (!withdrawAmount) return showToast('Enter amount', 'error')
+    try {
+      setLoading(true)
+      showToast('Emergency withdraw (10% penalty)...')
+      const hash = await emergencyWithdrawFromGoal(goalId, withdrawAmount)
+      showToast('Done! Tx: ' + hash.slice(0, 16) + '...')
+      setShowWithdrawModal(null)
+      setWithdrawAmount('')
+      await refreshData()
+    } catch (e) {
+      showToast('Failed: ' + e.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCreatePool = async () => {
+    if (!poolForm.name || !poolForm.contribution) return showToast('Fill all fields', 'error')
+    try {
+      setLoading(true)
+      showToast('Creating pool on Arc Network...')
+      const hash = await createPool(poolForm.name, poolForm.contribution, poolForm.cycle, poolForm.members)
+      showToast('Pool created! Tx: ' + hash.slice(0, 16) + '...')
       setShowPoolModal(false)
       setPoolForm({ name: '', contribution: '', cycle: '7', members: '5' })
-      await fetchPools()
+      await refreshData()
     } catch (e) {
       showToast('Failed: ' + e.message, 'error')
     } finally {
@@ -201,31 +159,63 @@ export default function App() {
     }
   }
 
-  const joinPool = async (poolId) => {
-    if (!signer) return showToast('Connect wallet first', 'error')
+  const handleJoinPool = async (poolId) => {
     try {
       setLoading(true)
-      const pool = new ethers.Contract(POOL_ADDRESS, POOL_ABI, signer)
-      const tx = await pool.joinPool(poolId)
       showToast('Joining pool...')
-      await tx.wait()
-      showToast('Joined pool successfully!')
-      await fetchPools()
+      const hash = await joinPool(poolId)
+      showToast('Joined! Tx: ' + hash.slice(0, 16) + '...')
+      await refreshData()
     } catch (e) {
       showToast('Failed: ' + e.message, 'error')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleContribute = async (poolId, amount) => {
+    try {
+      setLoading(true)
+      showToast('Contributing to pool...')
+      const hash = await contributeToPool(poolId, amount, account)
+      showToast('Contributed! Tx: ' + hash.slice(0, 16) + '...')
+      setShowContributeModal(null)
+      await refreshData()
+    } catch (e) {
+      showToast('Failed: ' + e.message, 'error')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fmt = (val) => {
+    try {
+      const { ethers } = require('ethers')
+      return parseFloat(ethers.formatUnits(val, 6)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    } catch {
+      return '0.00'
+    }
+  }
+
+  const fmtBigInt = (val) => {
+    if (!val) return '0.00'
+    return parseFloat((BigInt(val.toString()) / BigInt(1e4)).toString()) / 100
   }
 
   const progress = (current, target) => {
-    const pct = (Number(ethers.formatUnits(current, 6)) / Number(ethers.formatUnits(target, 6))) * 100
-    return Math.min(pct, 100).toFixed(1)
+    if (!current || !target) return 0
+    const c = Number(current.toString()) / 1e6
+    const t = Number(target.toString()) / 1e6
+    return Math.min((c / t) * 100, 100).toFixed(1)
   }
 
-  const fmt = (val) => parseFloat(ethers.formatUnits(val, 6)).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const formatUSDC = (val) => {
+    if (!val) return '0.00'
+    return (Number(val.toString()) / 1e6).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
 
-  const statusLabel = (s) => ['Open', 'Active', 'Completed'][s] || 'Unknown'
+  const statusLabel = (s) => ['Open', 'Active', 'Completed'][Number(s)] || 'Unknown'
+  const statusColor = (s) => ['#2E7D32', '#1565C0', '#6B7280'][Number(s)] || '#6B7280'
 
   return (
     <div className="app">
@@ -262,20 +252,51 @@ export default function App() {
       {account && activeTab === 'dashboard' && (
         <div className="dashboard">
           <div className="balance-card">
-            <small>USDC Balance</small>
+            <small>USDC Balance on Arc Testnet</small>
             <h2>{parseFloat(balance).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</h2>
-            <small>Arc Testnet · {account.slice(0, 10)}...</small>
+            <small>{account}</small>
           </div>
           <div className="summary-grid">
             <div className="scard orange"><h3>{goals.filter(g => g.isActive).length}</h3><p>Active Goals</p></div>
             <div className="scard green"><h3>{pools.length}</h3><p>Community Pools</p></div>
-            <div className="scard blue"><h3>6.2%</h3><p>Est. APY</p></div>
+            <div className="scard blue">
+              <h3>{goals.reduce((acc, g) => acc + Number(g.currentAmount || 0), 0) / 1e6 > 0
+                ? (goals.reduce((acc, g) => acc + Number(g.currentAmount || 0), 0) / 1e6).toFixed(2)
+                : '0.00'}
+              </h3>
+              <p>Total Saved (USDC)</p>
+            </div>
           </div>
           <div className="quick-actions">
             <button className="btn orange" onClick={() => { setActiveTab('goals'); setShowGoalModal(true) }}>+ New Goal</button>
             <button className="btn green" onClick={() => { setActiveTab('pools'); setShowPoolModal(true) }}>+ New Pool</button>
-            <a className="btn gray" href={`https://testnet.arcscan.app/address/${account}`} target="_blank">View on Explorer</a>
+            <a className="btn gray" href={`https://testnet.arcscan.app/address/${account}`} target="_blank" rel="noreferrer">View on Explorer</a>
           </div>
+
+          {/* Recent Goals Preview */}
+          {goals.length > 0 && (
+            <div style={{marginTop: '2rem'}}>
+              <h3 style={{fontFamily: 'Space Mono', marginBottom: '1rem'}}>Your Goals</h3>
+              <div className="goals-grid">
+                {goals.slice(0, 2).map((g, i) => (
+                  <div key={i} className="goal-card">
+                    <div className="goal-top">
+                      <h3>{g.name}</h3>
+                      <span className={`badge ${g.isActive ? 'active' : 'done'}`}>{g.isActive ? 'Active' : 'Done'}</span>
+                    </div>
+                    <div className="progress-bar">
+                      <div className="progress-fill" style={{ width: progress(g.currentAmount, g.targetAmount) + '%' }} />
+                    </div>
+                    <div className="goal-amounts">
+                      <span>{formatUSDC(g.currentAmount)} USDC</span>
+                      <span>{progress(g.currentAmount, g.targetAmount)}%</span>
+                      <span>{formatUSDC(g.targetAmount)} USDC</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -300,16 +321,22 @@ export default function App() {
                     <div className="progress-fill" style={{ width: progress(g.currentAmount, g.targetAmount) + '%' }} />
                   </div>
                   <div className="goal-amounts">
-                    <span>{fmt(g.currentAmount)} USDC</span>
+                    <span>{formatUSDC(g.currentAmount)} USDC</span>
                     <span>{progress(g.currentAmount, g.targetAmount)}%</span>
-                    <span>{fmt(g.targetAmount)} USDC</span>
+                    <span>{formatUSDC(g.targetAmount)} USDC</span>
                   </div>
                   <div className="goal-meta">
-                    <small>Lock: {(Number(g.lockPeriod) / 86400).toFixed(0)} days</small>
+                    <small>🔒 Lock: {(Number(g.lockPeriod) / 86400).toFixed(0)} days</small>
+                    <small style={{marginLeft: '1rem'}}>📅 Deadline: {new Date(Number(g.deadline) * 1000).toLocaleDateString()}</small>
                   </div>
                   <div className="goal-actions">
-                    <button className="btn orange sm" onClick={() => setShowDepositModal(i)}>Deposit</button>
-                    <a className="btn gray sm" href={`https://testnet.arcscan.app/address/${VAULT_ADDRESS}`} target="_blank">Explorer</a>
+                    {g.isActive && (
+                      <button className="btn orange sm" onClick={() => setShowDepositModal(i)}>💰 Deposit</button>
+                    )}
+                    {g.isActive && Number(g.currentAmount) > 0 && (
+                      <button className="btn gray sm" onClick={() => setShowWithdrawModal(i)}>📤 Withdraw</button>
+                    )}
+                    <a className="btn gray sm" href={`https://testnet.arcscan.app/address/0x6eD021481140a6B385dfc45d9c8B4F5D583Da1ab`} target="_blank" rel="noreferrer">🔍 Explorer</a>
                   </div>
                 </div>
               ))}
@@ -333,12 +360,22 @@ export default function App() {
                 <div key={i} className="pool-card">
                   <h3>{p.name}</h3>
                   <div className="pool-info">
-                    <div><small>Contribution</small><strong>{fmt(p.contributionAmount)} USDC</strong></div>
+                    <div><small>Contribution</small><strong>{formatUSDC(p.contributionAmount)} USDC</strong></div>
                     <div><small>Cycle</small><strong>{(Number(p.cycleDuration) / 86400).toFixed(0)} days</strong></div>
                     <div><small>Members</small><strong>{p.members.length}/{p.maxMembers.toString()}</strong></div>
-                    <div><small>Status</small><strong>{statusLabel(p.status)}</strong></div>
+                    <div><small>Status</small><strong style={{color: statusColor(p.status)}}>{statusLabel(p.status)}</strong></div>
                   </div>
-                  <button className="btn green sm" onClick={() => joinPool(p.id)}>Join Pool</button>
+                  {Number(p.status) === 0 && (
+                    <button className="btn green sm" onClick={() => handleJoinPool(p.id)} disabled={loading}>
+                      {loading ? '...' : 'Join Pool'}
+                    </button>
+                  )}
+                  {Number(p.status) === 1 && (
+                    <button className="btn orange sm" onClick={() => setShowContributeModal(p)} disabled={loading}>
+                      💰 Contribute
+                    </button>
+                  )}
+                  <a className="btn gray sm" style={{marginLeft: '0.5rem'}} href={`https://testnet.arcscan.app/address/0x1a3729b5ddc9A0FC9d5D21857539bCE460ac91D2`} target="_blank" rel="noreferrer">🔍 Explorer</a>
                 </div>
               ))}
             </div>
@@ -355,14 +392,14 @@ export default function App() {
             <input placeholder="e.g. Emergency Fund" value={goalForm.name} onChange={e => setGoalForm({ ...goalForm, name: e.target.value })} />
             <label>Target Amount (USDC)</label>
             <input type="number" placeholder="500" value={goalForm.target} onChange={e => setGoalForm({ ...goalForm, target: e.target.value })} />
-            <label>Duration (days)</label>
+            <label>Duration</label>
             <select value={goalForm.days} onChange={e => setGoalForm({ ...goalForm, days: e.target.value })}>
               <option value="30">30 days</option>
               <option value="90">90 days</option>
               <option value="180">180 days</option>
               <option value="365">365 days</option>
             </select>
-            <label>Lock Period (days)</label>
+            <label>Lock Period</label>
             <select value={goalForm.lock} onChange={e => setGoalForm({ ...goalForm, lock: e.target.value })}>
               <option value="7">7 days</option>
               <option value="30">30 days</option>
@@ -370,7 +407,7 @@ export default function App() {
             </select>
             <div className="modal-actions">
               <button className="btn gray" onClick={() => setShowGoalModal(false)}>Cancel</button>
-              <button className="btn orange" onClick={createGoal} disabled={loading}>
+              <button className="btn orange" onClick={handleCreateGoal} disabled={loading}>
                 {loading ? 'Creating...' : 'Create Goal'}
               </button>
             </div>
@@ -382,42 +419,60 @@ export default function App() {
       {showDepositModal !== null && (
         <div className="overlay" onClick={() => setShowDepositModal(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>Deposit to "{goals[showDepositModal]?.name}"</h2>
+            <h2>💰 Deposit to "{goals[showDepositModal]?.name}"</h2>
             <label>Amount (USDC)</label>
             <input type="number" placeholder="100" value={depositAmount} onChange={e => setDepositAmount(e.target.value)} />
-            <small style={{color:'#666'}}>Your balance: {parseFloat(balance).toFixed(2)} USDC</small>
+            <small style={{color:'#666', display:'block', marginTop:'0.5rem'}}>Your balance: {parseFloat(balance).toFixed(2)} USDC</small>
+            <small style={{color:'#666', display:'block'}}>Fee: 0.5% (max $5)</small>
             <div className="modal-actions">
               <button className="btn gray" onClick={() => setShowDepositModal(null)}>Cancel</button>
-              <button className="btn orange" onClick={() => depositToGoal(showDepositModal)} disabled={loading}>
-                {loading ? 'Depositing...' : 'Deposit'}
+              <button className="btn orange" onClick={handleDeposit} disabled={loading}>
+                {loading ? 'Processing...' : 'Deposit'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* CREATE POOL MODAL */}
-      {showPoolModal && (
-        <div className="overlay" onClick={() => setShowPoolModal(false)}>
+      {/* WITHDRAW MODAL */}
+      {showWithdrawModal !== null && (
+        <div className="overlay" onClick={() => setShowWithdrawModal(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h2>Create Community Pool</h2>
-            <label>Pool Name</label>
-            <input placeholder="e.g. Lagos Traders Ajo" value={poolForm.name} onChange={e => setPoolForm({ ...poolForm, name: e.target.value })} />
-            <label>Contribution per Cycle (USDC)</label>
-            <input type="number" placeholder="50" value={poolForm.contribution} onChange={e => setPoolForm({ ...poolForm, contribution: e.target.value })} />
-            <label>Cycle Duration</label>
-            <select value={poolForm.cycle} onChange={e => setPoolForm({ ...poolForm, cycle: e.target.value })}>
-              <option value="1">Daily</option>
-              <option value="7">Weekly</option>
-              <option value="14">Bi-weekly</option>
-              <option value="30">Monthly</option>
-            </select>
-            <label>Max Members</label>
-            <input type="number" placeholder="5" min="3" max="50" value={poolForm.members} onChange={e => setPoolForm({ ...poolForm, members: e.target.value })} />
+            <h2>📤 Withdraw from "{goals[showWithdrawModal]?.name}"</h2>
+            <div style={{background:'#FFF3EE', padding:'1rem', borderRadius:'8px', marginBottom:'1rem', border:'2px solid #FF6B35'}}>
+              <strong>Full Withdraw</strong> — available after lock period expires
+            </div>
+            <button className="btn orange" style={{width:'100%', marginBottom:'1rem'}} onClick={() => handleWithdraw(showWithdrawModal)} disabled={loading}>
+              {loading ? 'Processing...' : 'Withdraw All'}
+            </button>
+            <div style={{background:'#FFF3EE', padding:'1rem', borderRadius:'8px', marginBottom:'1rem', border:'2px solid #EF4444'}}>
+              <strong>⚠️ Emergency Withdraw</strong> — 10% penalty applies
+            </div>
+            <label>Emergency Amount (USDC)</label>
+            <input type="number" placeholder="100" value={withdrawAmount} onChange={e => setWithdrawAmount(e.target.value)} />
             <div className="modal-actions">
-              <button className="btn gray" onClick={() => setShowPoolModal(false)}>Cancel</button>
-              <button className="btn green" onClick={createPool} disabled={loading}>
-                {loading ? 'Creating...' : 'Create Pool'}
+              <button className="btn gray" onClick={() => setShowWithdrawModal(null)}>Cancel</button>
+              <button className="btn gray" style={{background:'#EF4444', color:'white'}} onClick={() => handleEmergencyWithdraw(showWithdrawModal)} disabled={loading}>
+                {loading ? 'Processing...' : '⚠️ Emergency Withdraw'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONTRIBUTE MODAL */}
+      {showContributeModal !== null && (
+        <div className="overlay" onClick={() => setShowContributeModal(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <h2>💰 Contribute to "{showContributeModal?.name}"</h2>
+            <div style={{background:'#F0FDF4', padding:'1rem', borderRadius:'8px', marginBottom:'1rem', border:'2px solid #2E7D32'}}>
+              <strong>Contribution Amount: {formatUSDC(showContributeModal?.contributionAmount)} USDC</strong>
+              <p style={{fontSize:'0.85rem', color:'#666', marginTop:'0.25rem'}}>This cycle's contribution to the Ajo pool</p>
+            </div>
+            <div className="modal-actions">
+              <button className="btn gray" onClick={() => setShowContributeModal(null)}>Cancel</button>
+              <button className="btn green" onClick={() => handleContribute(showContributeModal.id, (Number(showContributeModal.contributionAmount) / 1e6).toString())} disabled={loading}>
+                {loading ? 'Processing...' : 'Contribute Now'}
               </button>
             </div>
           </div>
