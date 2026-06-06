@@ -32,7 +32,7 @@ export default function TransactionHistory({ account }) {
       const vault = new ethers.Contract(VAULT_ADDRESS, vaultABI, provider)
       const pool = new ethers.Contract(POOL_ADDRESS, poolABI, provider)
       const currentBlock = await provider.getBlockNumber()
-      const fromBlock = Math.max(0, currentBlock - 100000)
+      const fromBlock = Math.max(0, currentBlock - 9000)
 
       const [goalCreated, deposited, withdrawn, poolCreated, memberJoined] = await Promise.all([
         vault.queryFilter(vault.filters.GoalCreated(account), fromBlock),

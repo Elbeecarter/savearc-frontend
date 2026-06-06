@@ -160,6 +160,30 @@ export default function App() {
     }
   }
 
+  const handleStartPool = async (poolId) => {
+    try {
+      setLoading(true)
+      showToast("Starting pool...")
+      const { ethers } = await import("ethers")
+      const POOL = "0x1a3729b5ddc9A0FC9d5D21857539bCE460ac91D2"
+      const iface = new ethers.Interface(["function startPool(uint256)"])
+      const data = iface.encodeFunctionData("startPool", [poolId])
+      const from = (await window.ethereum.request({ method: "eth_accounts" }))[0]
+      const provider = new ethers.JsonRpcProvider("https://rpc.testnet.arc.network")
+      const feeData = await provider.getFeeData()
+      const nonce = await provider.getTransactionCount(from)
+      const gasPrice = feeData.gasPrice
+      const gasEstimate = await provider.estimateGas({ from, to: POOL, data })
+      const gasLimit = (gasEstimate * 120n) / 100n
+      const txHash = await window.ethereum.request({ method: "eth_sendTransaction", params: [{ from, to: POOL, data, chainId: "0x4cef52", nonce: "0x" + nonce.toString(16), gas: "0x" + gasLimit.toString(16), maxFeePerGas: "0x" + gasPrice.toString(16), maxPriorityFeePerGas: "0x" + (gasPrice / 10n).toString(16) }] })
+      let receipt = null
+      while (!receipt) { await new Promise(r => setTimeout(r, 1500)); receipt = await provider.getTransactionReceipt(txHash) }
+      showToast("Pool started!")
+      await refreshData()
+    } catch(e) { showToast("Failed: " + e.message, "error") }
+    finally { setLoading(false) }
+  }
+
   const handleJoinPool = async (poolId) => {
     try {
       setLoading(true)
@@ -265,7 +289,7 @@ export default function App() {
                 ? (goals.reduce((acc, g) => acc + Number(g.currentAmount || 0), 0) / 1e6).toFixed(2)
                 : '0.00'}
               </h3>
-              <p>Total Saved (USDC)</p>
+              <p>Total Saved</p>
             </div>
           </div>
           <div className="quick-actions">
@@ -333,6 +357,7 @@ export default function App() {
                     <span>{formatUSDC(g.targetAmount)} USDC</span>
                   </div>
                   <div className="goal-meta">
+                    <small>⏳ Unlocks: {new Date((Number(g.lastDepositTime) + Number(g.lockPeriod)) * 1000).toLocaleDateString()}</small>
                     <small>🔒 Lock: {(Number(g.lockPeriod) / 86400).toFixed(0)} days</small>
                     <small style={{marginLeft: '1rem'}}>📅 Deadline: {new Date(Number(g.deadline) * 1000).toLocaleDateString()}</small>
                   </div>
@@ -372,7 +397,12 @@ export default function App() {
                     <div><small>Members</small><strong>{p.members.length}/{p.maxMembers.toString()}</strong></div>
                     <div><small>Status</small><strong style={{color: statusColor(p.status)}}>{statusLabel(p.status)}</strong></div>
                   </div>
-                  {Number(p.status) === 0 && (
+                  {Number(p.status) === 0 && p.creator?.toLowerCase() === account?.toLowerCase() && (
+                    <button className="btn orange sm" onClick={() => handleStartPool(p.id)} disabled={loading} style={{marginBottom:"0.5rem",width:"100%", opacity: p.members.length >= 3 ? 1 : 0.5}}>
+                      {loading ? "..." : "🚀 Start Pool (" + p.members.length + "/" + Number(p.maxMembers) + " members)"}
+                    </button>
+                  )}
+                  {Number(p.status) === 0 && p.creator?.toLowerCase() !== account?.toLowerCase() && (
                     <button className="btn green sm" onClick={() => handleJoinPool(p.id)} disabled={loading}>
                       {loading ? '...' : 'Join Pool'}
                     </button>
