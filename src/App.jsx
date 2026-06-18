@@ -544,8 +544,17 @@ export default function App() {
         </div>
       )}
 
+      {/* FOOTER */}
+      {!account && (
+        <footer style={{textAlign:"center",padding:"2rem",borderTop:"1px solid #E5E7EB",marginTop:"4rem",color:"#6B7280",fontSize:"0.85rem"}}>
+          <p>Built on <a href="https://arc.io" target="_blank" rel="noreferrer" style={{color:"#FF6B35"}}>Arc Network</a> · <a href="https://twitter.com/SaveArcHQ" target="_blank" rel="noreferrer" style={{color:"#FF6B35"}}>@SaveArcHQ</a> · <a href="https://github.com/Elbeecarter/savearc" target="_blank" rel="noreferrer" style={{color:"#FF6B35"}}>GitHub</a></p>
+          <p style={{marginTop:"0.5rem",fontSize:"0.75rem"}}>Testnet · Not financial advice</p>
+        </footer>
+      )}
+
       {/* TOAST */}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
     </div>
   )
 }
+// Footer added via patch
