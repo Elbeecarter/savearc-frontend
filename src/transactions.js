@@ -28,7 +28,7 @@ const USDC_ABI = [
   'function allowance(address,address) view returns (uint256)',
 ]
 
-const RPC = 'https://rpc.testnet.arc.network'
+const RPC = 'https://rpc.mainnet.arc.io'
 const getProvider = () => new ethers.JsonRpcProvider(RPC)
 const getAccount = async () => {
   const accounts = await window.ethereum.request({ method: 'eth_accounts' })

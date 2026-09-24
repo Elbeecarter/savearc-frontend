@@ -1,7 +1,7 @@
 import { ethers } from 'ethers'
 
-export const ARC_CHAIN_ID = 5042002
-export const ARC_HEX = '0x4cef52'
+export const ARC_CHAIN_ID = 5042
+export const ARC_HEX = '0x13b2'
 
 export const switchToArc = async () => {
   if (!window.ethereum) throw new Error('No wallet found')
@@ -15,11 +15,11 @@ export const switchToArc = async () => {
       await window.ethereum.request({
         method: 'wallet_addEthereumChain',
         params: [{
-          chainId: ARC_HEX,
-          chainName: 'Arc Testnet',
-          nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
-          rpcUrls: ['https://rpc.testnet.arc.network'],
-          blockExplorerUrls: ['https://testnet.arcscan.app'],
+          chainId: 5042,
+          chainName: 'Arc Mainnet',
+     nativeCurrency: { name: 'USDC', symbol: 'USDC', decimals: 18 },
+            rpcUrls: ['https://rpc.mainnet.arc.io'],
+blockExplorerUrls: ['https://explorer.arc.io'],
         }],
       })
     }
