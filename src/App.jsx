@@ -1,3 +1,4 @@
+import CircleLogin from './CircleLogin.jsx'
 import TransactionHistory from "./TransactionHistory.jsx"
 import { useState, useEffect } from 'react'
 import { switchToArc } from './utils.js'
@@ -25,6 +26,8 @@ export default function App() {
   const [poolForm, setPoolForm] = useState({ name: '', contribution: '', cycle: '7', members: '5' })
   const [depositAmount, setDepositAmount] = useState('')
   const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [circleUser, setCircleUser] = useState(null)
+const [showCircleLogin, setShowCircleLogin] = useState(false)
 
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type })
@@ -257,6 +260,13 @@ export default function App() {
         <button className={`connect-btn ${account ? 'connected' : ''}`} onClick={connectWallet} disabled={loading}>
           {loading ? '...' : account ? account.slice(0, 6) + '...' + account.slice(-4) : 'Connect Wallet'}
         </button>
+        <button
+  className="btn orange"
+  onClick={() => setShowCircleLogin(true)}
+  style={{marginRight:'0.5rem', fontSize:'0.8rem'}}
+>
+  📧 Email Login
+</button>
       </nav>
 
       {/* HERO */}
@@ -551,6 +561,19 @@ export default function App() {
           <p style={{marginTop:"0.5rem",fontSize:"0.75rem"}}>Testnet · Not financial advice</p>
         </footer>
       )}
+
+      {showCircleLogin && (
+  <div className="overlay" onClick={() => setShowCircleLogin(false)}>
+    <div onClick={e => e.stopPropagation()} style={{padding:'2rem'}}>
+      <CircleLogin onSuccess={(user) => {
+        setCircleUser(user)
+        setShowCircleLogin(false)
+        setAccount(user.email)
+        showToast('Wallet created! Welcome to SaveArc 🎉')
+      }} />
+    </div>
+  </div>
+)}
 
       {/* TOAST */}
       {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}

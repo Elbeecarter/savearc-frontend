@@ -10,6 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@circle-fin/user-controlled-wallets": "^10.8.1",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.4",
+    "express": "^5.2.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
