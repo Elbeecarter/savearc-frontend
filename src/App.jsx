@@ -287,7 +287,7 @@ const [showCircleLogin, setShowCircleLogin] = useState(false)
       {account && activeTab === 'dashboard' && (
         <div className="dashboard">
           <div className="balance-card">
-            <small>USDC Balance on Arc Testnet</small>
+            <small>USDC Balance on Arc Mainnet</small>
             <h2>{parseFloat(balance).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</h2>
             <small>{account}</small>
           </div>
